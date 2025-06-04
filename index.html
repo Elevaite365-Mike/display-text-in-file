@@ -2,26 +2,42 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Text-file viewer</title>
+  <title>Text-file viewer & editor</title>
 </head>
 <body>
-  <input type="file" id="fileInput" accept=".txt">
-  <br>
-  <input id="textOutput" rows="15" cols="70" />
+  <input type="file" id="fileInput" accept=".txt"><br>
+  <input id="textOutput"/><br>
+  <button id="downloadBtn">Download</button>
 
   <script>
-    const fileInput  = document.getElementById('fileInput');
-    const textOutput = document.getElementById('textOutput');
+    const fileInput   = document.getElementById('fileInput');
+    const textOutput  = document.getElementById('textOutput');
+    const downloadBtn = document.getElementById('downloadBtn');
+    let filename = 'download.txt';
 
     fileInput.addEventListener('change', () => {
       const file = fileInput.files[0];
       if (!file) return;
 
+      filename = file.name || filename;          // remember original name
       const reader = new FileReader();
       reader.onload = e => {
-        textOutput.value = e.target.result;
+        textOutput.value = e.target.result;      // show contents
       };
       reader.readAsText(file);
+    });
+
+    downloadBtn.addEventListener('click', () => {
+      const blob = new Blob([textOutput.value], { type: 'text/plain' });
+      const url  = URL.createObjectURL(blob);
+
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;                     // use original (or default) name
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);                  // tidy up
     });
   </script>
 </body>
