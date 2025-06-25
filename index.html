@@ -47,12 +47,32 @@
 
     /* ——————— util: detect BOM & decode ArrayBuffer ——————— */
     function decodeWithBOM(buf) {
-      const v = new Uint8Array(buf);
-      if (v[0] === 0xFF && v[1] === 0xFE) return new TextDecoder('utf-16le').decode(buf);
-      if (v[0] === 0xFE && v[1] === 0xFF) return new TextDecoder('utf-16be').decode(buf);
-      if (v[0] === 0xEF && v[1] === 0xBB && v[2] === 0xBF) return new TextDecoder('utf-8').decode(buf.slice(3));
-      return new TextDecoder('utf-8').decode(buf);  // default
+      const view = new Uint8Array(buf);
+    
+      // ── 1. Explicit BOM ─────────────────────────────
+      if (view[0] === 0xFF && view[1] === 0xFE) return new TextDecoder('utf-16le').decode(buf);
+      if (view[0] === 0xFE && view[1] === 0xFF) return new TextDecoder('utf-16be').decode(buf);
+      if (view[0] === 0xEF && view[1] === 0xBB && view[2] === 0xBF)
+        return new TextDecoder('utf-8').decode(buf.slice(3));
+    
+      // ── 2. Heuristic for BOM-less UTF-16 ────────────
+      const len = Math.min(64, view.length & ~1); // sample first 64 bytes, even length
+      let evenZero = 0, oddZero = 0;
+    
+      for (let i = 0; i < len; i += 2) {
+        if (view[i]   === 0x00) evenZero++;
+        if (view[i+1] === 0x00) oddZero++;
+      }
+      const ratioEven = evenZero / (len / 2);
+      const ratioOdd  = oddZero  / (len / 2);
+    
+      if (ratioOdd  > 0.6 && ratioEven < 0.2) return new TextDecoder('utf-16le').decode(buf);
+      if (ratioEven > 0.6 && ratioOdd  < 0.2) return new TextDecoder('utf-16be').decode(buf);
+    
+      // ── 3. Default to UTF-8 ─────────────────────────
+      return new TextDecoder('utf-8').decode(buf);
     }
+
 
     /* ——————— util: pretty-print XML ——————— */
     function formatXML(xmlStr) {
