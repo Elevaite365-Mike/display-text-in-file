@@ -2,92 +2,122 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>Text / XML viewer & editor (auto-detect encoding)</title>
+  <title>Text / XML viewer & editor (pretty-print)</title>
   <style>
     body { font-family: system-ui, sans-serif; padding: 1rem; }
+
+    /* layout */
     .viewer { display: flex; gap: 1rem; }
-    #textOutput, #textDisplay {
+    textarea, pre {
       width: 50%; height: 70vh; box-sizing: border-box;
-      font-family: monospace;
+      font-family: monospace; font-size: 0.9rem;
     }
-    #textOutput       { resize: vertical; }
-    #textDisplay      { overflow: auto; white-space: pre-wrap; background:#f8f8f8; border:1px solid #ccc; padding:.5rem;}
+    textarea { resize: vertical; }
+    pre {
+      margin: 0;
+      overflow: auto;
+      background: #f8f8f8;
+      border: 1px solid #ccc;
+      padding: .75rem;
+      white-space: pre-wrap;     /* keep line-breaks */
+      word-wrap: break-word;     /* wrap long attributes */
+    }
+    input[type="file"] { margin-bottom: .5rem; }
+    button { margin-top: .5rem; }
   </style>
 </head>
 <body>
-  <input type="file" id="fileInput" accept=".txt,.xml,text/plain,text/xml"><br>
+  <input type="file" id="fileInput"
+         accept=".txt,.xml,text/plain,text/xml"><br>
 
   <div class="viewer">
-    <textarea id="textOutput" spellcheck="false"></textarea>
-    <p        id="textDisplay"></p>
+    <textarea id="textOutput" spellcheck="false"
+              placeholder="(raw editable text)"></textarea>
+    <pre id="prettyOutput">(formatted preview will appear here)</pre>
   </div>
 
   <button id="downloadBtn">Download</button>
 
   <script>
-    const fileInput   = document.getElementById('fileInput');
-    const textOutput  = document.getElementById('textOutput');
-    const textDisplay = document.getElementById('textDisplay');
-    const downloadBtn = document.getElementById('downloadBtn');
-    let   filename    = 'download.txt';
+    const fileInput    = document.getElementById('fileInput');
+    const textOutput   = document.getElementById('textOutput');
+    const prettyOutput = document.getElementById('prettyOutput');
+    const downloadBtn  = document.getElementById('downloadBtn');
+    let   filename     = 'download.txt';
 
-    // ---------- helper: pick the right decoder ----------
+    /* ——————— util: detect BOM & decode ArrayBuffer ——————— */
     function decodeWithBOM(buf) {
-      const view = new Uint8Array(buf);
-
-      // UTF-16LE BOM: FF FE
-      if (view[0] === 0xFF && view[1] === 0xFE) {
-        return new TextDecoder('utf-16le').decode(buf);
-      }
-      // UTF-16BE BOM: FE FF
-      if (view[0] === 0xFE && view[1] === 0xFF) {
-        return new TextDecoder('utf-16be').decode(buf);
-      }
-      // UTF-8 BOM: EF BB BF
-      if (view[0] === 0xEF && view[1] === 0xBB && view[2] === 0xBF) {
-        return new TextDecoder('utf-8').decode(buf.slice(3)); // skip BOM
-      }
-
-      // No BOM → assume UTF-8
-      return new TextDecoder('utf-8').decode(buf);
+      const v = new Uint8Array(buf);
+      if (v[0] === 0xFF && v[1] === 0xFE) return new TextDecoder('utf-16le').decode(buf);
+      if (v[0] === 0xFE && v[1] === 0xFF) return new TextDecoder('utf-16be').decode(buf);
+      if (v[0] === 0xEF && v[1] === 0xBB && v[2] === 0xBF) return new TextDecoder('utf-8').decode(buf.slice(3));
+      return new TextDecoder('utf-8').decode(buf);  // default
     }
 
-    // ---------- open file ----------
+    /* ——————— util: pretty-print XML ——————— */
+    function formatXML(xmlStr) {
+      try {
+        const dom = new DOMParser().parseFromString(xmlStr, 'application/xml');
+        // check for parse errors
+        if (dom.getElementsByTagName('parsererror').length) throw new Error('bad xml');
+
+        const xs = new XMLSerializer().serializeToString(dom);
+        // turn >\< into >\n<  then indent
+        const step = '  ';
+        let indent = 0, pretty = xs
+          .replace(/>\s*</g, '>\n<')
+          .split('\n')
+          .map(line => {
+            if (/^<\//.test(line)) indent -= 1;
+            const pad = step.repeat(Math.max(indent,0));
+            if (!/^<\/.*>/.test(line) && !/\/>$/.test(line)) indent += 1;
+            return pad + line;
+          })
+          .join('\n');
+        return pretty;
+      } catch {
+        return xmlStr;   // fall back to raw
+      }
+    }
+
+    /* ——————— open file ——————— */
     fileInput.addEventListener('change', () => {
       const file = fileInput.files[0];
       if (!file) return;
-
       filename = file.name || filename;
-      const reader = new FileReader();
 
-      reader.onload = e => {
-        const text = decodeWithBOM(e.target.result);
-        textOutput.value        = text;
-        textDisplay.textContent = text;
+      const rd = new FileReader();
+      rd.onload = e => {
+        const raw  = decodeWithBOM(e.target.result);
+        textOutput.value = raw;
+        if (raw.trim().startsWith('<')) {           // looks like XML
+          prettyOutput.textContent = formatXML(raw);
+        } else {
+          prettyOutput.textContent = raw;           // plain text preview
+        }
       };
-
-      reader.readAsArrayBuffer(file); // we’ll decode ourselves
+      rd.readAsArrayBuffer(file);
     });
 
-    // keep preview in sync while editing
+    /* keep preview in sync while typing */
     textOutput.addEventListener('input', () => {
-      textDisplay.textContent = textOutput.value;
+      const raw = textOutput.value;
+      prettyOutput.textContent = raw.trim().startsWith('<')
+        ? formatXML(raw)
+        : raw;
     });
 
-    // ---------- save / download ----------
+    /* ——————— download ——————— */
     downloadBtn.addEventListener('click', () => {
       const isXML = filename.toLowerCase().endsWith('.xml');
       const blob  = new Blob(
         [textOutput.value],
         { type: isXML ? 'text/xml' : 'text/plain' }
       );
-
       const url = URL.createObjectURL(blob);
       const a   = Object.assign(document.createElement('a'),
         { href: url, download: filename });
-
-      document.body.appendChild(a);
-      a.click();
+      document.body.appendChild(a); a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     });
