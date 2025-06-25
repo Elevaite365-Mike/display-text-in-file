@@ -5,13 +5,33 @@
   <title>Text / XML viewer & editor</title>
   <style>
     body { font-family: system-ui, sans-serif; padding: 1rem; }
+
+    /* side-by-side layout */
+    .viewer {
+      display: flex;
+      gap: 1rem;
+    }
+
     #textOutput {
-      width: 100%;           /* fill the page */
-      height: 60vh;          /* 60 % of viewport height */
+      width: 50%;
+      height: 70vh;
       box-sizing: border-box;
       font-family: monospace;
-      resize: vertical;      /* user can drag taller/shorter */
+      resize: vertical;
     }
+
+    #textDisplay {
+      width: 50%;
+      height: 70vh;
+      overflow: auto;
+      white-space: pre-wrap;       /* keep line breaks */
+      font-family: monospace;
+      border: 1px solid #ccc;
+      padding: .5rem;
+      box-sizing: border-box;
+      background: #f8f8f8;
+    }
+
     input[type="file"] { margin-bottom: .5rem; }
     button { margin-top: .5rem; }
   </style>
@@ -23,32 +43,41 @@
     accept=".txt,.xml,text/plain,text/xml"
   ><br>
 
-  <textarea id="textOutput" spellcheck="false"></textarea><br>
+  <div class="viewer">
+    <textarea id="textOutput" spellcheck="false"></textarea>
+    <p id="textDisplay"></p>
+  </div>
 
   <button id="downloadBtn">Download</button>
 
   <script>
-    const fileInput   = document.getElementById('fileInput');
-    const textOutput  = document.getElementById('textOutput');
-    const downloadBtn = document.getElementById('downloadBtn');
-    let filename      = 'download.txt';
+    const fileInput    = document.getElementById('fileInput');
+    const textOutput   = document.getElementById('textOutput');
+    const textDisplay  = document.getElementById('textDisplay');
+    const downloadBtn  = document.getElementById('downloadBtn');
+    let filename       = 'download.txt';
 
-    // ────────────────────────────── open file ──────────────────────────────
+    // ─────────── open file ───────────
     fileInput.addEventListener('change', () => {
       const file = fileInput.files[0];
       if (!file) return;
 
-      filename = file.name || filename;          // remember original name
+      filename = file.name || filename;
       const reader = new FileReader();
       reader.onload = e => {
-        textOutput.value = e.target.result;      // show contents
+        textOutput.value       = e.target.result;
+        textDisplay.textContent = e.target.result;
       };
       reader.readAsText(file);
     });
 
-    // ───────────────────────────── save/download ───────────────────────────
+    // keep <p> in sync while editing
+    textOutput.addEventListener('input', () => {
+      textDisplay.textContent = textOutput.value;
+    });
+
+    // ─────────── save/download ───────────
     downloadBtn.addEventListener('click', () => {
-      // choose MIME type based on extension (simple check)
       const isXML = filename.toLowerCase().endsWith('.xml');
       const blob  = new Blob(
         [textOutput.value],
@@ -64,7 +93,7 @@
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);                  // tidy up
+      URL.revokeObjectURL(url);
     });
   </script>
 </body>
