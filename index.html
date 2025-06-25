@@ -1,20 +1,39 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <title>Text-file viewer & editor</title>
+  <meta charset="UTF-8" />
+  <title>Text / XML viewer & editor</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 1rem; }
+    #textOutput {
+      width: 100%;           /* fill the page */
+      height: 60vh;          /* 60 % of viewport height */
+      box-sizing: border-box;
+      font-family: monospace;
+      resize: vertical;      /* user can drag taller/shorter */
+    }
+    input[type="file"] { margin-bottom: .5rem; }
+    button { margin-top: .5rem; }
+  </style>
 </head>
 <body>
-  <input type="file" id="fileInput" accept=".txt"><br>
-  <input id="textOutput"/><br>
+  <input
+    type="file"
+    id="fileInput"
+    accept=".txt,.xml,text/plain,text/xml"
+  ><br>
+
+  <textarea id="textOutput" spellcheck="false"></textarea><br>
+
   <button id="downloadBtn">Download</button>
 
   <script>
     const fileInput   = document.getElementById('fileInput');
     const textOutput  = document.getElementById('textOutput');
     const downloadBtn = document.getElementById('downloadBtn');
-    let filename = 'download.txt';
+    let filename      = 'download.txt';
 
+    // ────────────────────────────── open file ──────────────────────────────
     fileInput.addEventListener('change', () => {
       const file = fileInput.files[0];
       if (!file) return;
@@ -27,13 +46,21 @@
       reader.readAsText(file);
     });
 
+    // ───────────────────────────── save/download ───────────────────────────
     downloadBtn.addEventListener('click', () => {
-      const blob = new Blob([textOutput.value], { type: 'text/plain' });
-      const url  = URL.createObjectURL(blob);
+      // choose MIME type based on extension (simple check)
+      const isXML = filename.toLowerCase().endsWith('.xml');
+      const blob  = new Blob(
+        [textOutput.value],
+        { type: isXML ? 'text/xml' : 'text/plain' }
+      );
 
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;                     // use original (or default) name
+      const url = URL.createObjectURL(blob);
+      const a   = Object.assign(document.createElement('a'), {
+        href: url,
+        download: filename
+      });
+
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
