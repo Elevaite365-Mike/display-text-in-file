@@ -2,81 +2,79 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>Text / XML viewer & editor</title>
+  <title>Text / XML viewer & editor (auto-detect encoding)</title>
   <style>
     body { font-family: system-ui, sans-serif; padding: 1rem; }
-
-    /* side-by-side layout */
-    .viewer {
-      display: flex;
-      gap: 1rem;
-    }
-
-    #textOutput {
-      width: 50%;
-      height: 70vh;
-      box-sizing: border-box;
+    .viewer { display: flex; gap: 1rem; }
+    #textOutput, #textDisplay {
+      width: 50%; height: 70vh; box-sizing: border-box;
       font-family: monospace;
-      resize: vertical;
     }
-
-    #textDisplay {
-      width: 50%;
-      height: 70vh;
-      overflow: auto;
-      white-space: pre-wrap;       /* keep line breaks */
-      font-family: monospace;
-      border: 1px solid #ccc;
-      padding: .5rem;
-      box-sizing: border-box;
-      background: #f8f8f8;
-    }
-
-    input[type="file"] { margin-bottom: .5rem; }
-    button { margin-top: .5rem; }
+    #textOutput       { resize: vertical; }
+    #textDisplay      { overflow: auto; white-space: pre-wrap; background:#f8f8f8; border:1px solid #ccc; padding:.5rem;}
   </style>
 </head>
 <body>
-  <input
-    type="file"
-    id="fileInput"
-    accept=".txt,.xml,text/plain,text/xml"
-  ><br>
+  <input type="file" id="fileInput" accept=".txt,.xml,text/plain,text/xml"><br>
 
   <div class="viewer">
     <textarea id="textOutput" spellcheck="false"></textarea>
-    <p id="textDisplay"></p>
+    <p        id="textDisplay"></p>
   </div>
 
   <button id="downloadBtn">Download</button>
 
   <script>
-    const fileInput    = document.getElementById('fileInput');
-    const textOutput   = document.getElementById('textOutput');
-    const textDisplay  = document.getElementById('textDisplay');
-    const downloadBtn  = document.getElementById('downloadBtn');
-    let filename       = 'download.txt';
+    const fileInput   = document.getElementById('fileInput');
+    const textOutput  = document.getElementById('textOutput');
+    const textDisplay = document.getElementById('textDisplay');
+    const downloadBtn = document.getElementById('downloadBtn');
+    let   filename    = 'download.txt';
 
-    // ─────────── open file ───────────
+    // ---------- helper: pick the right decoder ----------
+    function decodeWithBOM(buf) {
+      const view = new Uint8Array(buf);
+
+      // UTF-16LE BOM: FF FE
+      if (view[0] === 0xFF && view[1] === 0xFE) {
+        return new TextDecoder('utf-16le').decode(buf);
+      }
+      // UTF-16BE BOM: FE FF
+      if (view[0] === 0xFE && view[1] === 0xFF) {
+        return new TextDecoder('utf-16be').decode(buf);
+      }
+      // UTF-8 BOM: EF BB BF
+      if (view[0] === 0xEF && view[1] === 0xBB && view[2] === 0xBF) {
+        return new TextDecoder('utf-8').decode(buf.slice(3)); // skip BOM
+      }
+
+      // No BOM → assume UTF-8
+      return new TextDecoder('utf-8').decode(buf);
+    }
+
+    // ---------- open file ----------
     fileInput.addEventListener('change', () => {
       const file = fileInput.files[0];
       if (!file) return;
 
       filename = file.name || filename;
       const reader = new FileReader();
+
       reader.onload = e => {
-        textOutput.value       = e.target.result;
-        textDisplay.textContent = e.target.result;
+        const text = decodeWithBOM(e.target.result);
+        textOutput.value        = text;
+        textDisplay.textContent = text;
       };
-      reader.readAsText(file);
+
+      reader.readAsArrayBuffer(file); // we’ll decode ourselves
     });
 
-    // keep <p> in sync while editing
+    // keep preview in sync while editing
     textOutput.addEventListener('input', () => {
       textDisplay.textContent = textOutput.value;
     });
 
-    // ─────────── save/download ───────────
+    // ---------- save / download ----------
     downloadBtn.addEventListener('click', () => {
       const isXML = filename.toLowerCase().endsWith('.xml');
       const blob  = new Blob(
@@ -85,10 +83,8 @@
       );
 
       const url = URL.createObjectURL(blob);
-      const a   = Object.assign(document.createElement('a'), {
-        href: url,
-        download: filename
-      });
+      const a   = Object.assign(document.createElement('a'),
+        { href: url, download: filename });
 
       document.body.appendChild(a);
       a.click();
