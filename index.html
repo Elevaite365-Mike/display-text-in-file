@@ -2,14 +2,14 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>Text / XML viewer & editor (pretty-print)</title>
+  <title>Text / XML viewer & editor (pretty-print + XPath update)</title>
   <style>
     body { font-family: system-ui, sans-serif; padding: 1rem; }
 
     /* layout */
-    .viewer { display: flex; gap: 1rem; }
+    .viewer { display: flex; gap: 1rem; flex-wrap: wrap; }
     textarea, pre {
-      width: 50%; height: 70vh; box-sizing: border-box;
+      width: 48%; height: 70vh; box-sizing: border-box;
       font-family: monospace; font-size: 0.9rem;
     }
     textarea { resize: vertical; }
@@ -22,6 +22,15 @@
       white-space: pre-wrap;     /* keep line-breaks */
       word-wrap: break-word;     /* wrap long attributes */
     }
+    .xml-tools {
+      margin-top: 1rem;
+      padding: .75rem;
+      border: 1px solid #ccc;
+      background: #fdfdfd;
+      display: none;            /* shown only for XML */
+      width: fit-content;
+    }
+    .xml-tools input { margin-right: .5rem; }
     input[type="file"] { margin-bottom: .5rem; }
     button { margin-top: .5rem; }
   </style>
@@ -36,6 +45,14 @@
     <pre id="prettyOutput">(formatted preview will appear here)</pre>
   </div>
 
+  <!-- — XML-specific panel — -->
+  <div id="xmlTools" class="xml-tools">
+    <strong>XML quick edit</strong><br>
+    Path <input id="xmlPath"  placeholder="e.g. //Account or Account">
+    Value <input id="xmlValue" placeholder="e.g. 10001">
+    <button id="applyBtn">Update XML</button>
+  </div>
+
   <button id="downloadBtn">Download</button>
 
   <script>
@@ -43,61 +60,56 @@
     const textOutput   = document.getElementById('textOutput');
     const prettyOutput = document.getElementById('prettyOutput');
     const downloadBtn  = document.getElementById('downloadBtn');
+    const xmlTools     = document.getElementById('xmlTools');
+    const xmlPath      = document.getElementById('xmlPath');
+    const xmlValue     = document.getElementById('xmlValue');
+    const applyBtn     = document.getElementById('applyBtn');
     let   filename     = 'download.txt';
 
     /* ——————— util: detect BOM & decode ArrayBuffer ——————— */
     function decodeWithBOM(buf) {
       const view = new Uint8Array(buf);
-    
-      // ── 1. Explicit BOM ─────────────────────────────
+
+      // 1. explicit BOM
       if (view[0] === 0xFF && view[1] === 0xFE) return new TextDecoder('utf-16le').decode(buf);
       if (view[0] === 0xFE && view[1] === 0xFF) return new TextDecoder('utf-16be').decode(buf);
       if (view[0] === 0xEF && view[1] === 0xBB && view[2] === 0xBF)
         return new TextDecoder('utf-8').decode(buf.slice(3));
-    
-      // ── 2. Heuristic for BOM-less UTF-16 ────────────
-      const len = Math.min(64, view.length & ~1); // sample first 64 bytes, even length
-      let evenZero = 0, oddZero = 0;
-    
+
+      // 2. heuristic for BOM-less UTF-16
+      const len = Math.min(64, view.length & ~1);
+      let even0 = 0, odd0 = 0;
       for (let i = 0; i < len; i += 2) {
-        if (view[i]   === 0x00) evenZero++;
-        if (view[i+1] === 0x00) oddZero++;
+        if (view[i]   === 0) even0++;
+        if (view[i+1] === 0) odd0++;
       }
-      const ratioEven = evenZero / (len / 2);
-      const ratioOdd  = oddZero  / (len / 2);
-    
-      if (ratioOdd  > 0.6 && ratioEven < 0.2) return new TextDecoder('utf-16le').decode(buf);
-      if (ratioEven > 0.6 && ratioOdd  < 0.2) return new TextDecoder('utf-16be').decode(buf);
-    
-      // ── 3. Default to UTF-8 ─────────────────────────
+      if (odd0 / (len/2)  > 0.6) return new TextDecoder('utf-16le').decode(buf);
+      if (even0 / (len/2) > 0.6) return new TextDecoder('utf-16be').decode(buf);
+
+      // 3. default to UTF-8
       return new TextDecoder('utf-8').decode(buf);
     }
-
 
     /* ——————— util: pretty-print XML ——————— */
     function formatXML(xmlStr) {
       try {
         const dom = new DOMParser().parseFromString(xmlStr, 'application/xml');
-        // check for parse errors
         if (dom.getElementsByTagName('parsererror').length) throw new Error('bad xml');
 
-        const xs = new XMLSerializer().serializeToString(dom);
-        // turn >\< into >\n<  then indent
+        const xs   = new XMLSerializer().serializeToString(dom);
         const step = '  ';
-        let indent = 0, pretty = xs
+        let indent = 0;
+        return xs
           .replace(/>\s*</g, '>\n<')
           .split('\n')
           .map(line => {
-            if (/^<\//.test(line)) indent -= 1;
-            const pad = step.repeat(Math.max(indent,0));
-            if (!/^<\/.*>/.test(line) && !/\/>$/.test(line)) indent += 1;
+            if (/^<\//.test(line)) indent--;
+            const pad = step.repeat(Math.max(indent, 0));
+            if (!/^<\/.*>/.test(line) && !/\/>$/.test(line)) indent++;
             return pad + line;
           })
           .join('\n');
-        return pretty;
-      } catch {
-        return xmlStr;   // fall back to raw
-      }
+      } catch { return xmlStr; }
     }
 
     /* ——————— open file ——————— */
@@ -108,32 +120,74 @@
 
       const rd = new FileReader();
       rd.onload = e => {
-        const raw  = decodeWithBOM(e.target.result);
+        const raw = decodeWithBOM(e.target.result);
         textOutput.value = raw;
-        if (raw.trim().startsWith('<')) {           // looks like XML
-          prettyOutput.textContent = formatXML(raw);
-        } else {
-          prettyOutput.textContent = raw;           // plain text preview
-        }
+        updatePreview();
+        toggleXMLTools(raw.trim().startsWith('<'));
       };
       rd.readAsArrayBuffer(file);
     });
 
     /* keep preview in sync while typing */
     textOutput.addEventListener('input', () => {
+      updatePreview();
+    });
+
+    function updatePreview() {
       const raw = textOutput.value;
-      prettyOutput.textContent = raw.trim().startsWith('<')
-        ? formatXML(raw)
-        : raw;
+      prettyOutput.textContent = raw.trim().startsWith('<') ? formatXML(raw) : raw;
+    }
+
+    function toggleXMLTools(isXML) {
+      xmlTools.style.display = isXML ? 'block' : 'none';
+    }
+
+    /* ——————— XML updater ——————— */
+    applyBtn.addEventListener('click', () => {
+      const path = xmlPath.value.trim();
+      if (!path) return alert('Please enter an XPath or tag name.');
+      const newVal = xmlValue.value;
+
+      const dom = new DOMParser().parseFromString(textOutput.value, 'application/xml');
+      if (dom.getElementsByTagName('parsererror').length) {
+        return alert('Current text is not valid XML.');
+      }
+
+      // try XPath first; fall back to tag name
+      let node;
+      try {
+        node = dom.evaluate(
+          path,
+          dom,
+          null,
+          XPathResult.FIRST_ORDERED_NODE_TYPE,
+          null
+        ).singleNodeValue;
+      } catch { /* invalid XPath syntax */ }
+
+      if (!node && /^[\w:-]+$/.test(path)) {
+        node = dom.getElementsByTagName(path)[0];
+      }
+
+      if (!node) return alert('Path not found.');
+
+      // replace text content (or attribute value if XPath ends with @)
+      if (node.nodeType === Node.ATTRIBUTE_NODE) {
+        node.value = newVal;
+      } else {
+        node.textContent = newVal;
+      }
+
+      const xmlStr = new XMLSerializer().serializeToString(dom);
+      textOutput.value = xmlStr;
+      updatePreview();
     });
 
     /* ——————— download ——————— */
     downloadBtn.addEventListener('click', () => {
       const isXML = filename.toLowerCase().endsWith('.xml');
-      const blob  = new Blob(
-        [textOutput.value],
-        { type: isXML ? 'text/xml' : 'text/plain' }
-      );
+      const blob  = new Blob([textOutput.value],
+        { type: isXML ? 'text/xml' : 'text/plain' });
       const url = URL.createObjectURL(blob);
       const a   = Object.assign(document.createElement('a'),
         { href: url, download: filename });
